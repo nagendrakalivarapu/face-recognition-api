@@ -1,91 +1,344 @@
-from fastapi import APIRouter, UploadFile, File, Form
-from app.services.face_service import face_service
 import os
-import shutil
-import numpy as np
+import tempfile
+
+from pathlib import Path
+
+from fastapi import (
+    APIRouter,
+    UploadFile,
+    File,
+    Form
+)
+
+from app.models.face_model import (
+    FaceDetectionResponse,
+    FaceRecognitionResponse,
+    FaceRegistrationResponse
+)
+
+from app.services.face_service import (
+    face_service
+)
+
 
 router = APIRouter(
     prefix="/face",
     tags=["Face Recognition"]
 )
 
-UPLOAD_FOLDER = "uploads"
-EMBEDDING_FOLDER = "embeddings"
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(EMBEDDING_FOLDER, exist_ok=True)
-
+# ============================================================
+# HEALTH
+# ============================================================
 
 @router.get("/health")
 async def health():
+
     return {
         "status": "healthy",
-        "message": "Face Recognition API is Working"
+        "message": (
+            "Face Recognition API is Working"
+        )
     }
 
 
-@router.post("/register")
+# ============================================================
+# REGISTER FACE
+# ============================================================
+
+@router.post(
+    "/register",
+    response_model=FaceRegistrationResponse
+)
 async def register_face(
-    student_id: str = Form(...),
-    image: UploadFile = File(...)
+        student_id: str = Form(...),
+        image: UploadFile = File(...)
 ):
-    try:
-        # Save uploaded image
-        filename = f"{student_id}.jpg"
-        image_path = os.path.join(UPLOAD_FOLDER, filename)
 
-        with open(image_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
+    if not student_id.strip():
 
-        # Generate face embedding
-        result = face_service.generate_embedding(image_path)
-
-        # Face validation failed
-        if not result["success"]:
-            if os.path.exists(image_path):
-                os.remove(image_path)
-
-            return {
-                "success": False,
-                "message": result["message"]
-            }
-
-        # Save embedding
-        embedding_path = os.path.join(
-            EMBEDDING_FOLDER,
-            f"{student_id}.npy"
-        )
-
-        np.save(embedding_path, result["embedding"])
-
-        return {
-            "success": True,
-            "studentId": student_id,
-            "imagePath": image_path,
-            "embeddingPath": embedding_path,
-            "message": "Student registered successfully."
-        }
-
-    except Exception as e:
         return {
             "success": False,
-            "message": str(e)
+            "message": (
+                "student_id is required."
+            )
         }
-    
-@router.post("/recognize")
+
+    if image is None:
+
+        return {
+            "success": False,
+            "message": (
+                "Image is required."
+            )
+        }
+
+    temp_path = None
+
+    try:
+
+        # ====================================================
+        # UNIQUE TEMP FILE
+        # ====================================================
+
+        suffix = Path(
+            image.filename or ".jpg"
+        ).suffix
+
+        if not suffix:
+            suffix = ".jpg"
+
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix
+        ) as temp_file:
+
+            temp_path = temp_file.name
+
+            while True:
+
+                chunk = await image.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                temp_file.write(
+                    chunk
+                )
+
+        # ====================================================
+        # REGISTER
+        # ====================================================
+
+        result = (
+            face_service.register_face(
+                student_id.strip(),
+                temp_path
+            )
+        )
+
+        return result
+
+    except Exception as exc:
+
+        print(
+            f"Face registration error: {exc}"
+        )
+
+        return {
+            "success": False,
+            "message": (
+                "Face registration failed."
+            )
+        }
+
+    finally:
+
+        if (
+                temp_path
+                and
+                os.path.exists(temp_path)
+        ):
+
+            try:
+                os.remove(
+                    temp_path
+                )
+            except Exception:
+                pass
+
+
+# ============================================================
+# RECOGNIZE FACE
+# ============================================================
+
+@router.post(
+    "/recognize",
+    response_model=FaceRecognitionResponse
+)
 async def recognize_face(
-    image: UploadFile = File(...)
+        image: UploadFile = File(...)
 ):
 
-    filename = "temp.jpg"
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    if image is None:
 
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
+        return {
+            "success": False,
+            "message": (
+                "Image is required."
+            )
+        }
 
-    result = face_service.recognize_face(filepath)
+    temp_path = None
 
-    if os.path.exists(filepath):
-        os.remove(filepath)
+    try:
 
-    return result
+        # ====================================================
+        # UNIQUE TEMP FILE
+        # ====================================================
+
+        suffix = Path(
+            image.filename or ".jpg"
+        ).suffix
+
+        if not suffix:
+            suffix = ".jpg"
+
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix
+        ) as temp_file:
+
+            temp_path = temp_file.name
+
+            while True:
+
+                chunk = await image.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                temp_file.write(
+                    chunk
+                )
+
+        # ====================================================
+        # RECOGNIZE
+        # ====================================================
+
+        result = (
+            face_service.recognize_face(
+                temp_path
+            )
+        )
+
+        return result
+
+    except Exception as exc:
+
+        print(
+            f"Face recognition error: {exc}"
+        )
+
+        return {
+            "success": False,
+            "message": (
+                "Face recognition failed."
+            )
+        }
+
+    finally:
+
+        if (
+                temp_path
+                and
+                os.path.exists(temp_path)
+        ):
+
+            try:
+                os.remove(
+                    temp_path
+                )
+            except Exception:
+                pass
+
+
+# ============================================================
+# DETECT FACE
+# ============================================================
+
+@router.post(
+    "/detect",
+    response_model=FaceDetectionResponse
+)
+async def detect_face(
+        image: UploadFile = File(...)
+):
+
+    if image is None:
+
+        return {
+            "success": False,
+            "message": (
+                "Image is required."
+            )
+        }
+
+    temp_path = None
+
+    try:
+
+        # ====================================================
+        # UNIQUE TEMP FILE
+        # ====================================================
+
+        suffix = Path(
+            image.filename or ".jpg"
+        ).suffix
+
+        if not suffix:
+            suffix = ".jpg"
+
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix
+        ) as temp_file:
+
+            temp_path = temp_file.name
+
+            while True:
+
+                chunk = await image.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                temp_file.write(
+                    chunk
+                )
+
+        # ====================================================
+        # DETECT
+        # ====================================================
+
+        result = (
+            face_service.detect_face(
+                temp_path
+            )
+        )
+
+        return result
+
+    except Exception as exc:
+
+        print(
+            f"Face detection error: {exc}"
+        )
+
+        return {
+            "success": False,
+            "message": (
+                "Face detection failed."
+            )
+        }
+
+    finally:
+
+        if (
+                temp_path
+                and
+                os.path.exists(temp_path)
+        ):
+
+            try:
+                os.remove(
+                    temp_path
+                )
+            except Exception:
+                pass
