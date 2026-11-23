@@ -1,96 +1,83 @@
-from typing import Optional
-
 from pydantic import BaseModel, Field
-
 
 # ============================================================
 # FACE QUALITY
 # ============================================================
 
+
 class FaceQuality(BaseModel):
-    detectionScore: float = Field(
-        ...,
-        description="Face detection confidence score"
-    )
+    detectionScore: float = Field(..., description="Face detection confidence score")
 
-    faceWidth: int = Field(
-        ...,
-        description="Detected face width in pixels"
-    )
+    faceWidth: int = Field(..., description="Detected face width in pixels")
 
-    faceHeight: int = Field(
-        ...,
-        description="Detected face height in pixels"
-    )
+    faceHeight: int = Field(..., description="Detected face height in pixels")
 
-    blurScore: float = Field(
-        ...,
-        description="Image sharpness score"
-    )
+    blurScore: float = Field(..., description="Image sharpness score")
 
-    brightness: float = Field(
-        ...,
-        description="Average image brightness"
-    )
+    brightness: float = Field(..., description="Average image brightness")
 
 
 # ============================================================
 # FACE DETECTION RESPONSE
 # ============================================================
 
+
 class FaceDetectionResponse(BaseModel):
     success: bool
 
     message: str
 
-    code: Optional[str] = None
+    code: str | None = None
 
-    faceCount: Optional[int] = None
+    faceCount: int | None = None
 
-    quality: Optional[FaceQuality] = None
+    quality: FaceQuality | None = None
 
 
 # ============================================================
 # FACE RECOGNITION RESPONSE
 # ============================================================
 
+
 class FaceRecognitionResponse(BaseModel):
     success: bool
 
     message: str
 
-    code: Optional[str] = None
+    code: str | None = None
 
-    studentId: Optional[str] = None
+    studentId: str | None = None
 
-    confidence: Optional[float] = None
+    confidence: float | None = None
 
 
 # ============================================================
 # FACE REGISTRATION RESPONSE
 # ============================================================
 
+
 class FaceRegistrationResponse(BaseModel):
     success: bool
 
     message: str
 
-    studentId: Optional[str] = None
+    studentId: str | None = None
 
-    imagePath: Optional[str] = None
+    imagePath: str | None = None
 
-    embeddingPath: Optional[str] = None
+    embeddingPath: str | None = None
 
-    quality: Optional[FaceQuality] = None
+    quality: FaceQuality | None = None
 
 
 # ============================================================
 # GENERIC FACE ERROR RESPONSE
 # ============================================================
 
+
 class FaceErrorResponse(BaseModel):
     success: bool = False
 
     message: str
 
-    code: Optional[str] = None
+    code: str | None = None

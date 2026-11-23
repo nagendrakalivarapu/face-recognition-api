@@ -1,22 +1,19 @@
-
+import logging
+import math
 import os
 import re
-import cv2
-import logging
 import tempfile
-import numpy as np
-
 from pathlib import Path
 from threading import RLock
 
+import cv2
+import numpy as np
 from insightface.app import FaceAnalysis
-
 
 logger = logging.getLogger(__name__)
 
 
 class FaceService:
-
     STUDENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
     MAX_EMBEDDING_FILE_SIZE = 1024 * 1024
@@ -45,7 +42,7 @@ class FaceService:
         # CONFIGURATION
         # ========================================================
 
-        self.model_name = os.getenv("FACE_MODEL", "buffalo_l")
+        self.model_name = os.getenv("FACE_MODEL", "buffalo_l").strip()
 
         self.det_size = int(os.getenv("FACE_DET_SIZE", "640"))
         self.ctx_id = int(os.getenv("FACE_CTX_ID", "0"))
@@ -54,38 +51,22 @@ class FaceService:
             os.getenv("FACE_RECOGNITION_THRESHOLD", "0.60")
         )
 
-        self.min_margin = float(
-            os.getenv("FACE_MIN_MARGIN", "0.02")
-        )
+        self.min_margin = float(os.getenv("FACE_MIN_MARGIN", "0.02"))
 
-        self.min_detection_score = float(
-            os.getenv("FACE_MIN_DET_SCORE", "0.50")
-        )
+        self.min_detection_score = float(os.getenv("FACE_MIN_DET_SCORE", "0.50"))
 
-        self.min_face_size = int(
-            os.getenv("FACE_MIN_FACE_SIZE", "80")
-        )
+        self.min_face_size = int(os.getenv("FACE_MIN_FACE_SIZE", "80"))
 
-        self.min_blur_score = float(
-            os.getenv("FACE_MIN_BLUR_SCORE", "45")
-        )
+        self.min_blur_score = float(os.getenv("FACE_MIN_BLUR_SCORE", "45"))
 
-        self.min_brightness = float(
-            os.getenv("FACE_MIN_BRIGHTNESS", "35")
-        )
+        self.min_brightness = float(os.getenv("FACE_MIN_BRIGHTNESS", "35"))
 
-        self.max_brightness = float(
-            os.getenv("FACE_MAX_BRIGHTNESS", "235")
-        )
+        self.max_brightness = float(os.getenv("FACE_MAX_BRIGHTNESS", "235"))
 
-        self.max_image_size = int(
-            os.getenv("FACE_MAX_IMAGE_SIZE", "1600")
-        )
+        self.max_image_size = int(os.getenv("FACE_MAX_IMAGE_SIZE", "1600"))
 
         # InsightFace buffalo_l uses 512-dimensional embeddings.
-        self.embedding_dimension = int(
-            os.getenv("FACE_EMBEDDING_DIM", "512")
-        )
+        self.embedding_dimension = int(os.getenv("FACE_EMBEDDING_DIM", "512"))
 
         self._validate_configuration()
 
@@ -108,8 +89,7 @@ class FaceService:
         self.face_app = FaceAnalysis(name=self.model_name)
 
         self.face_app.prepare(
-            ctx_id=self.ctx_id,
-            det_size=(self.det_size, self.det_size)
+            ctx_id=self.ctx_id, det_size=(self.det_size, self.det_size)
         )
 
         logger.info("InsightFace model loaded successfully.")
@@ -126,6 +106,9 @@ class FaceService:
 
     def _validate_configuration(self):
 
+        if not self.model_name:
+            raise ValueError("FACE_MODEL must not be empty.")
+
         if self.det_size <= 0:
             raise ValueError("FACE_DET_SIZE must be positive.")
 
@@ -138,6 +121,17 @@ class FaceService:
         if self.max_image_size <= 0:
             raise ValueError("FACE_MAX_IMAGE_SIZE must be positive.")
 
+        thresholds = (
+            self.recognition_threshold,
+            self.min_margin,
+            self.min_detection_score,
+            self.min_blur_score,
+            self.min_brightness,
+            self.max_brightness,
+        )
+        if not all(math.isfinite(value) for value in thresholds):
+            raise ValueError("Face recognition thresholds must be finite.")
+
         if not 0.0 <= self.recognition_threshold <= 1.0:
             raise ValueError("Invalid face recognition threshold.")
 
@@ -147,7 +141,10 @@ class FaceService:
         if not 0.0 <= self.min_detection_score <= 1.0:
             raise ValueError("Invalid face detection threshold.")
 
-        if self.min_brightness >= self.max_brightness:
+        if self.min_blur_score < 0.0:
+            raise ValueError("FACE_MIN_BLUR_SCORE must not be negative.")
+
+        if not 0.0 <= self.min_brightness < self.max_brightness <= 255.0:
             raise ValueError("Invalid brightness configuration.")
 
     # ============================================================
@@ -158,7 +155,7 @@ class FaceService:
     def validate_student_id(cls, student_id: str) -> str:
 
         if not isinstance(student_id, str):
-            raise ValueError("Invalid student ID.")
+            raise TypeError("Invalid student ID.")
 
         student_id = student_id.strip()
 
@@ -204,10 +201,7 @@ class FaceService:
         if not path.is_file():
             return None
 
-        image = cv2.imread(
-            str(path),
-            cv2.IMREAD_COLOR
-        )
+        image = cv2.imread(str(path), cv2.IMREAD_COLOR)
 
         if image is None:
             return None
@@ -223,16 +217,13 @@ class FaceService:
         largest_dimension = max(height, width)
 
         if largest_dimension > self.max_image_size:
-
             scale = self.max_image_size / float(largest_dimension)
 
             new_width = max(1, int(width * scale))
             new_height = max(1, int(height * scale))
 
             image = cv2.resize(
-                image,
-                (new_width, new_height),
-                interpolation=cv2.INTER_AREA
+                image, (new_width, new_height), interpolation=cv2.INTER_AREA
             )
 
         return image
@@ -243,10 +234,7 @@ class FaceService:
 
     def _calculate_brightness(self, image):
 
-        gray = cv2.cvtColor(
-            image,
-            cv2.COLOR_BGR2GRAY
-        )
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         return float(np.mean(gray))
 
@@ -256,17 +244,9 @@ class FaceService:
 
     def _calculate_blur_score(self, image):
 
-        gray = cv2.cvtColor(
-            image,
-            cv2.COLOR_BGR2GRAY
-        )
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        return float(
-            cv2.Laplacian(
-                gray,
-                cv2.CV_64F
-            ).var()
-        )
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
     # ============================================================
     # FACE CROP
@@ -302,11 +282,10 @@ class FaceService:
         image = self._read_image(image_path)
 
         if image is None:
-
             return {
                 "success": False,
                 "code": "INVALID_IMAGE",
-                "message": "Unable to read image."
+                "message": "Unable to read image.",
             }
 
         brightness = self._calculate_brightness(image)
@@ -315,29 +294,21 @@ class FaceService:
             return {
                 "success": False,
                 "code": "INVALID_IMAGE",
-                "message": "Unable to process image."
+                "message": "Unable to process image.",
             }
 
         if brightness < self.min_brightness:
-
             return {
                 "success": False,
                 "code": "LOW_BRIGHTNESS",
-                "message": (
-                    "Image is too dark. "
-                    "Please improve the lighting."
-                )
+                "message": ("Image is too dark. Please improve the lighting."),
             }
 
         if brightness > self.max_brightness:
-
             return {
                 "success": False,
                 "code": "HIGH_BRIGHTNESS",
-                "message": (
-                    "Image is too bright. "
-                    "Please reduce the lighting."
-                )
+                "message": ("Image is too bright. Please reduce the lighting."),
             }
 
         # Protect model inference against concurrent access.
@@ -345,18 +316,13 @@ class FaceService:
             faces = self.face_app.get(image)
 
         if len(faces) == 0:
-
             return {
                 "success": False,
                 "code": "NO_FACE",
-                "message": (
-                    "No face detected. "
-                    "Please move into the camera frame."
-                )
+                "message": ("No face detected. Please move into the camera frame."),
             }
 
         if len(faces) > 1:
-
             return {
                 "success": False,
                 "code": "MULTIPLE_FACES",
@@ -364,27 +330,24 @@ class FaceService:
                     "Multiple faces detected. "
                     "Only one person should be visible "
                     "in the camera."
-                )
+                ),
             }
 
         face = faces[0]
 
-        detection_score = float(
-            getattr(face, "det_score", 0.0)
-        )
+        detection_score = float(getattr(face, "det_score", 0.0))
 
         if (
-                not np.isfinite(detection_score)
-                or detection_score < self.min_detection_score
+            not np.isfinite(detection_score)
+            or detection_score < self.min_detection_score
         ):
-
             return {
                 "success": False,
                 "code": "LOW_DETECTION_CONFIDENCE",
                 "message": (
                     "Face detection confidence is too low. "
                     "Please move closer to the camera."
-                )
+                ),
             }
 
         bbox = np.asarray(face.bbox, dtype=np.float32)
@@ -393,7 +356,7 @@ class FaceService:
             return {
                 "success": False,
                 "code": "INVALID_FACE_REGION",
-                "message": "Unable to process the detected face."
+                "message": "Unable to process the detected face.",
             }
 
         x1, y1, x2, y2 = bbox.astype(int)
@@ -401,44 +364,29 @@ class FaceService:
         face_width = x2 - x1
         face_height = y2 - y1
 
-        if (
-                face_width < self.min_face_size
-                or face_height < self.min_face_size
-        ):
-
+        if face_width < self.min_face_size or face_height < self.min_face_size:
             return {
                 "success": False,
                 "code": "FACE_TOO_SMALL",
-                "message": (
-                    "Face is too small. "
-                    "Please move closer to the camera."
-                )
+                "message": ("Face is too small. Please move closer to the camera."),
             }
 
         face_crop = self._get_face_crop(image, face)
 
         if face_crop is None:
-
             return {
                 "success": False,
                 "code": "INVALID_FACE_REGION",
-                "message": "Unable to process the detected face."
+                "message": "Unable to process the detected face.",
             }
 
         blur_score = self._calculate_blur_score(face_crop)
 
-        if (
-                not np.isfinite(blur_score)
-                or blur_score < self.min_blur_score
-        ):
-
+        if not np.isfinite(blur_score) or blur_score < self.min_blur_score:
             return {
                 "success": False,
                 "code": "BLURRY_IMAGE",
-                "message": (
-                    "Image is too blurry. "
-                    "Please hold the camera steady."
-                )
+                "message": ("Image is too blurry. Please hold the camera steady."),
             }
 
         return {
@@ -449,7 +397,7 @@ class FaceService:
             "faceWidth": face_width,
             "faceHeight": face_height,
             "blurScore": blur_score,
-            "brightness": brightness
+            "brightness": brightness,
         }
 
     # ============================================================
@@ -460,10 +408,7 @@ class FaceService:
     def _normalize_embedding(embedding):
 
         try:
-            embedding = np.asarray(
-                embedding,
-                dtype=np.float32
-            )
+            embedding = np.asarray(embedding, dtype=np.float32)
         except (TypeError, ValueError):
             return None
 
@@ -487,10 +432,7 @@ class FaceService:
     def _normalize_embedding_matrix(self, embeddings):
 
         try:
-            embeddings = np.asarray(
-                embeddings,
-                dtype=np.float32
-            )
+            embeddings = np.asarray(embeddings, dtype=np.float32)
         except (TypeError, ValueError):
             return None
 
@@ -498,7 +440,6 @@ class FaceService:
             return None
 
         if embeddings.ndim == 1:
-
             if embeddings.shape[0] != self.embedding_dimension:
                 return None
 
@@ -511,16 +452,12 @@ class FaceService:
             return None
 
         if (
-                embeddings.shape[0] < 1
-                or embeddings.shape[0] > self.MAX_REFERENCE_EMBEDDINGS
+            embeddings.shape[0] < 1
+            or embeddings.shape[0] > self.MAX_REFERENCE_EMBEDDINGS
         ):
             return None
 
-        norms = np.linalg.norm(
-            embeddings,
-            axis=1,
-            keepdims=True
-        )
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
 
         if not np.all(np.isfinite(norms)):
             return None
@@ -543,55 +480,38 @@ class FaceService:
 
         face = result["face"]
 
-        embedding = getattr(
-            face,
-            "normed_embedding",
-            None
-        )
+        embedding = getattr(face, "normed_embedding", None)
 
         if embedding is None:
-
-            embedding = getattr(
-                face,
-                "embedding",
-                None
-            )
+            embedding = getattr(face, "embedding", None)
 
         if embedding is None:
-
             return {
                 "success": False,
                 "code": "EMBEDDING_FAILED",
-                "message": "Unable to generate face embedding."
+                "message": "Unable to generate face embedding.",
             }
 
         normalized = self._normalize_embedding(embedding)
 
-        if (
-                normalized is None
-                or normalized.shape[0] != self.embedding_dimension
-        ):
-
+        if normalized is None or normalized.shape[0] != self.embedding_dimension:
             return {
                 "success": False,
                 "code": "INVALID_EMBEDDING",
-                "message": "Generated face embedding is invalid."
+                "message": "Generated face embedding is invalid.",
             }
 
         return {
             "success": True,
             "message": "Embedding generated successfully.",
-
             # Required by register_face()
             "image": result["image"],
-
             "embedding": normalized,
-
             "detectionScore": result["detectionScore"],
             "faceWidth": result["faceWidth"],
             "faceHeight": result["faceHeight"],
             "blurScore": result["blurScore"],
-            "brightness": result["brightness"]
+            "brightness": result["brightness"],
         }
 
     # ============================================================
@@ -603,59 +523,39 @@ class FaceService:
         new_cache = {}
 
         for file in self.embedding_folder.iterdir():
-
             if file.suffix.lower() != ".npy":
                 continue
 
             try:
-
                 student_id = self.validate_student_id(file.stem)
 
                 # Reject symbolic links.
                 if file.is_symlink() or not file.is_file():
-                    logger.warning(
-                        "Skipping unsafe embedding file: %s",
-                        file.name
-                    )
+                    logger.warning("Skipping unsafe embedding file: %s", file.name)
                     continue
 
                 if file.stat().st_size > self.MAX_EMBEDDING_FILE_SIZE:
-                    logger.warning(
-                        "Skipping oversized embedding file: %s",
-                        file.name
-                    )
+                    logger.warning("Skipping oversized embedding file: %s", file.name)
                     continue
 
-                embedding = np.load(
-                    str(file),
-                    allow_pickle=False
-                )
+                embedding = np.load(str(file), allow_pickle=False)
 
                 normalized = self._normalize_embedding_matrix(embedding)
 
                 if normalized is None:
-                    logger.warning(
-                        "Skipping invalid embedding file: %s",
-                        file.name
-                    )
+                    logger.warning("Skipping invalid embedding file: %s", file.name)
                     continue
 
                 # Keep a private copy in memory.
                 new_cache[student_id] = normalized.copy()
 
             except Exception:
-                logger.exception(
-                    "Failed loading embedding file: %s",
-                    file.name
-                )
+                logger.exception("Failed loading embedding file: %s", file.name)
 
         with self.cache_lock:
             self.embedding_cache = new_cache
 
-        logger.info(
-            "Loaded %d student embeddings into memory.",
-            len(new_cache)
-        )
+        logger.info("Loaded %d student embeddings into memory.", len(new_cache))
 
     # ============================================================
     # ADD EMBEDDING TO CACHE
@@ -684,11 +584,7 @@ class FaceService:
         normalized = self._normalize_embedding_matrix(embedding)
 
         if normalized is None:
-
-            return {
-                "success": False,
-                "message": "Invalid embedding."
-            }
+            return {"success": False, "message": "Invalid embedding."}
 
         if normalized.ndim == 2 and normalized.shape[0] == 1:
             normalized = normalized[0]
@@ -698,15 +594,13 @@ class FaceService:
         temp_path = None
 
         try:
-
             with tempfile.NamedTemporaryFile(
-                    mode="wb",
-                    suffix=".npy",
-                    prefix=".embedding_",
-                    dir=self.embedding_folder,
-                    delete=False
+                mode="wb",
+                suffix=".npy",
+                prefix=".embedding_",
+                dir=self.embedding_folder,
+                delete=False,
             ) as temp_file:
-
                 temp_path = Path(temp_file.name)
 
                 np.save(temp_file, normalized, allow_pickle=False)
@@ -721,22 +615,15 @@ class FaceService:
 
             return {
                 "success": True,
-                "embeddingPath": str(
-                    embedding_path.relative_to(self.base_dir)
-                )
+                "embeddingPath": str(embedding_path.relative_to(self.base_dir)),
             }
 
         except (OSError, ValueError):
-
             logger.exception("Failed to save face embedding.")
 
-            return {
-                "success": False,
-                "message": "Unable to save face embedding."
-            }
+            return {"success": False, "message": "Unable to save face embedding."}
 
         finally:
-
             if temp_path is not None:
                 try:
                     temp_path.unlink(missing_ok=True)
@@ -751,32 +638,26 @@ class FaceService:
 
         try:
             student_id = self.validate_student_id(student_id)
-        except ValueError:
-            return {
-                "success": False,
-                "message": "Invalid student ID."
-            }
+        except (TypeError, ValueError):
+            return {"success": False, "message": "Invalid student ID."}
 
         with self.registration_lock:
-
             image_destination = self._get_image_path(student_id)
             embedding_destination = self._get_embedding_path(student_id)
 
             # Prevent silent overwriting of existing registrations.
             with self.cache_lock:
-
                 already_registered = (
-                        student_id in self.embedding_cache
-                        or image_destination.exists()
-                        or embedding_destination.exists()
+                    student_id in self.embedding_cache
+                    or image_destination.exists()
+                    or embedding_destination.exists()
                 )
 
             if already_registered:
-
                 return {
                     "success": False,
                     "studentId": student_id,
-                    "message": "Face is already registered for this student."
+                    "message": "Face is already registered for this student.",
                 }
 
             result = self.generate_embedding(image_path)
@@ -792,7 +673,7 @@ class FaceService:
                 return {
                     "success": False,
                     "code": "IMAGE_SAVE_FAILED",
-                    "message": "Failed to encode face image."
+                    "message": "Failed to encode face image.",
                 }
 
             embedding = result["embedding"]
@@ -804,16 +685,14 @@ class FaceService:
             embedding_committed = False
 
             try:
-
                 # Stage image in the same directory.
                 with tempfile.NamedTemporaryFile(
-                        mode="wb",
-                        suffix=".jpg",
-                        prefix=".face_",
-                        dir=self.upload_folder,
-                        delete=False
+                    mode="wb",
+                    suffix=".jpg",
+                    prefix=".face_",
+                    dir=self.upload_folder,
+                    delete=False,
                 ) as temp_file:
-
                     image_temp_path = Path(temp_file.name)
 
                     temp_file.write(encoded_image.tobytes())
@@ -822,20 +701,15 @@ class FaceService:
 
                 # Stage embedding in the same directory.
                 with tempfile.NamedTemporaryFile(
-                        mode="wb",
-                        suffix=".npy",
-                        prefix=".embedding_",
-                        dir=self.embedding_folder,
-                        delete=False
+                    mode="wb",
+                    suffix=".npy",
+                    prefix=".embedding_",
+                    dir=self.embedding_folder,
+                    delete=False,
                 ) as temp_file:
-
                     embedding_temp_path = Path(temp_file.name)
 
-                    np.save(
-                        temp_file,
-                        embedding,
-                        allow_pickle=False
-                    )
+                    np.save(temp_file, embedding, allow_pickle=False)
 
                     temp_file.flush()
                     os.fsync(temp_file.fileno())
@@ -845,7 +719,7 @@ class FaceService:
                     return {
                         "success": False,
                         "studentId": student_id,
-                        "message": "Face is already registered for this student."
+                        "message": "Face is already registered for this student.",
                     }
 
                 # Commit both files.
@@ -862,30 +736,21 @@ class FaceService:
                 return {
                     "success": True,
                     "studentId": student_id,
-                    "imagePath": str(
-                        image_destination.relative_to(self.base_dir)
-                    ),
+                    "imagePath": str(image_destination.relative_to(self.base_dir)),
                     "embeddingPath": str(
                         embedding_destination.relative_to(self.base_dir)
                     ),
                     "message": "Student registered successfully.",
                     "quality": {
-                        "detectionScore": round(
-                            float(result["detectionScore"]), 4
-                        ),
+                        "detectionScore": round(float(result["detectionScore"]), 4),
                         "faceWidth": int(result["faceWidth"]),
                         "faceHeight": int(result["faceHeight"]),
-                        "blurScore": round(
-                            float(result["blurScore"]), 2
-                        ),
-                        "brightness": round(
-                            float(result["brightness"]), 2
-                        )
-                    }
+                        "blurScore": round(float(result["blurScore"]), 2),
+                        "brightness": round(float(result["brightness"]), 2),
+                    },
                 }
 
             except Exception:
-
                 logger.exception("Face registration storage failed.")
 
                 # Roll back only files created by this registration.
@@ -902,13 +767,11 @@ class FaceService:
                     "success": False,
                     "code": "REGISTRATION_FAILED",
                     "studentId": student_id,
-                    "message": "Face registration failed."
+                    "message": "Face registration failed.",
                 }
 
             finally:
-
                 for temp_path in (image_temp_path, embedding_temp_path):
-
                     if temp_path is not None:
                         try:
                             temp_path.unlink(missing_ok=True)
@@ -931,100 +794,76 @@ class FaceService:
         unknown_embedding = result["embedding"]
 
         with self.cache_lock:
+            references = tuple(self.embedding_cache.items())
 
-            if not self.embedding_cache:
-
-                return {
-                    "success": False,
-                    "code": "NO_REGISTERED_STUDENTS",
-                    "message": "No registered students found."
-                }
-
-            scores = []
-
-            for student_id, saved_embeddings in self.embedding_cache.items():
-
-                # Defensive validation in case cache contents were changed.
-                saved_embeddings = self._normalize_embedding_matrix(
-                    saved_embeddings
-                )
-
-                if saved_embeddings is None:
-                    continue
-
-                if saved_embeddings.ndim == 1:
-
-                    score = float(
-                        np.dot(
-                            unknown_embedding,
-                            saved_embeddings
-                        )
-                    )
-
-                else:
-
-                    reference_scores = (
-                            saved_embeddings @ unknown_embedding
-                    )
-
-                    score = float(np.max(reference_scores))
-
-                if np.isfinite(score):
-                    scores.append((student_id, score))
-
-        if not scores:
-
+        if not references:
             return {
                 "success": False,
                 "code": "NO_REGISTERED_STUDENTS",
-                "message": "No valid registered faces found."
+                "message": "No registered students found.",
             }
 
-        scores.sort(
-            key=lambda item: item[1],
-            reverse=True
-        )
+        best_student = None
+        best_score = -np.inf
+        second_best_score = -1.0
+        score_count = 0
 
-        best_student, best_score = scores[0]
+        for student_id, saved_embeddings in references:
+            # Cache entries are normalized when loaded or written.
+            if saved_embeddings.ndim == 1:
+                score = float(np.dot(unknown_embedding, saved_embeddings))
 
-        second_best_score = (
-            scores[1][1]
-            if len(scores) > 1
-            else -1.0
-        )
+            else:
+                reference_scores = saved_embeddings @ unknown_embedding
+                score = float(np.max(reference_scores))
 
-        margin = (
-            best_score - second_best_score
-            if len(scores) > 1
-            else 1.0
-        )
+            if not np.isfinite(score):
+                continue
+
+            score_count += 1
+
+            if score > best_score:
+                if best_student is not None:
+                    second_best_score = best_score
+
+                best_student = student_id
+                best_score = score
+
+            elif score > second_best_score:
+                second_best_score = score
+
+        if best_student is None:
+            return {
+                "success": False,
+                "code": "NO_REGISTERED_STUDENTS",
+                "message": "No valid registered faces found.",
+            }
+
+        margin = best_score - second_best_score
 
         if best_score < self.recognition_threshold:
-
             return {
                 "success": False,
                 "code": "UNKNOWN_PERSON",
                 "message": "Unknown Person.",
-                "confidence": round(float(best_score), 4)
+                "confidence": round(float(best_score), 4),
             }
 
-        if len(scores) > 1 and margin < self.min_margin:
-
+        if score_count > 1 and margin < self.min_margin:
             return {
                 "success": False,
                 "code": "AMBIGUOUS_MATCH",
                 "message": (
-                    "Face match is ambiguous. "
-                    "Please look directly at the camera."
+                    "Face match is ambiguous. Please look directly at the camera."
                 ),
-                "confidence": round(float(best_score), 4)
+                "confidence": round(float(best_score), 4),
             }
 
         return {
             "success": True,
             "studentId": best_student,
             "confidence": round(float(best_score), 4),
-            "message": "Face recognized successfully."
+            "message": "Face recognized successfully.",
         }
 
     # ============================================================
@@ -1043,18 +882,12 @@ class FaceService:
             "message": "Exactly one face detected.",
             "faceCount": 1,
             "quality": {
-                "detectionScore": round(
-                    float(result["detectionScore"]), 4
-                ),
+                "detectionScore": round(float(result["detectionScore"]), 4),
                 "faceWidth": int(result["faceWidth"]),
                 "faceHeight": int(result["faceHeight"]),
-                "blurScore": round(
-                    float(result["blurScore"]), 2
-                ),
-                "brightness": round(
-                    float(result["brightness"]), 2
-                )
-            }
+                "blurScore": round(float(result["blurScore"]), 2),
+                "brightness": round(float(result["brightness"]), 2),
+            },
         }
 
 
